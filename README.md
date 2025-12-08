@@ -36,9 +36,17 @@ Hardware used: Raspberry Pi 4, Primoni Picade X HAT and Primoni Plasma Button Ki
 Ansible Integration: Upon entering the "GAME_OVER" state, the game initiates a call to an external Ansible Automation Platform (AAP/AWX) API URL to launch a job template, passing the final score.
 
 ------------
+# Packages Required 
+	https://github.com/pimoroni/picade-hat
+	https://github.com/pimoroni/plasma-python
+	https://github.com/pimoroni/plasma
 
+------------
 # How to Run
 	open terminal
 	git clone https://github.com/nazcardev/wack-a-pirate.git
 	cd wack-a-pirate
 	python3 -m src.main
+
+
+   
