@@ -1,8 +1,8 @@
 # wack-a-pirate: Whack-A-Pirate Battle
 ## Overview
-Whack-A-Pirate Battle is a fast-paced, hardware-integrated game built using Pygame that transforms the classic "Whack-A-Mole" mechanic into a frantic defense battle.
+Whack-A-Pirate Battle is a fast-paced, hardware-integrated game built using Pygame that transforms the classic "Whack-A-Mole" mechanic into a frantic naval defense battle.
 
-The primary objective is to defend your fixed Ship from an invading Enemy Fleet of ships before your Ship health (PLAYER_MAX_HEALTH is 10) drops to zero.
+The primary objective is to defend your fixed Fortress from an invading Enemy Fleet of pirate ships before your Fortress health (PLAYER_MAX_HEALTH is 10) drops to zero.
 
 ## Core Gameplay
 The game runs for a fixed duration of 30 seconds (GAME_DURATION) and centers around quickly reacting to the active enemy target.
@@ -22,15 +22,23 @@ The game ends and a score is tallied when one of the following conditions is met
 
 VICTORY: All enemy ships in the fleet are sunk (get_current_target_ship() is None).
 
-DEFEAT: The Player Ship/Fortress health reaches zero or less.
+DEFEAT: The Player Fortress health reaches zero or less.
 
 TIME'S UP: The GAME_DURATION expires.
 
 ## Hardware and Automation Integration
 The game is intended to be run on a dedicated device ( Raspberry Pi) and includes integration points for external systems:
 
-Input Hardware: The game uses evdev to monitor input events, expecting 9 physical buttons connected to the machine (via Picade X Hat).
+Input Hardware: The game uses evdev to monitor input events, expecting 9 physical buttons connected to the machine.
 
 Hardware used: Raspberry Pi 4, Primoni Picade X HAT and Primoni Plasma Button Kit.
 
 Ansible Integration: Upon entering the "GAME_OVER" state, the game initiates a call to an external Ansible Automation Platform (AAP/AWX) API URL to launch a job template, passing the final score.
+
+------------
+
+# How to Run
+	open terminal
+	git clone https://github.com/nazcardev/wack-a-pirate.git
+	cd wack-a-pirate
+	python3 -m src.main
