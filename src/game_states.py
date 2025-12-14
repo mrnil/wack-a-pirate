@@ -3,6 +3,10 @@ from abc import ABC, abstractmethod
 from enum import Enum
 import pygame
 from . import config
+from .events import (
+    GameEvent, StartScreenEvent, CountdownStartEvent, CountdownFinishedEvent,
+    GameOverEvent, event_dispatcher
+)
 
 class GameStateType(Enum):
     START_SCREEN = "start_screen"
@@ -17,8 +21,8 @@ class GameState(ABC):
         self.app = app
         
     @abstractmethod
-    def handle_event(self, event):
-        """Handle hardware events specific to this state."""
+    def handle_event(self, event: GameEvent):
+        """Handle game events specific to this state."""
         pass
         
     @abstractmethod
@@ -34,10 +38,10 @@ class GameState(ABC):
 class StartScreenState(GameState):
     """Initial state waiting for player to start the game."""
     
-    def handle_event(self, event):
-        if event.get('type') == "START_SCREEN":
+    def handle_event(self, event: GameEvent):
+        if isinstance(event, StartScreenEvent):
             return GameStateType.START_SCREEN
-        elif event.get('type') == "COUNTDOWN_START":
+        elif isinstance(event, CountdownStartEvent):
             return GameStateType.COUNTDOWN
         return None
         
@@ -65,8 +69,8 @@ class StartScreenState(GameState):
 class CountdownState(GameState):
     """Countdown before game starts."""
     
-    def handle_event(self, event):
-        if event.get('type') == "COUNTDOWN_FINISHED":
+    def handle_event(self, event: GameEvent):
+        if isinstance(event, CountdownFinishedEvent):
             return GameStateType.PLAYING
         return None
         
@@ -80,9 +84,9 @@ class CountdownState(GameState):
 class PlayingState(GameState):
     """Active gameplay state."""
     
-    def handle_event(self, event):
-        if event.get('type') == "GAME_OVER":
-            self.app.last_game_score = int(event.get('score', 0))
+    def handle_event(self, event: GameEvent):
+        if isinstance(event, GameOverEvent):
+            self.app.last_game_score = int(event.score)
             return GameStateType.GAME_OVER
         return None
         
@@ -113,8 +117,8 @@ class PlayingState(GameState):
 class GameOverState(GameState):
     """Game over screen showing results."""
     
-    def handle_event(self, event):
-        if event.get('type') == "START_SCREEN":
+    def handle_event(self, event: GameEvent):
+        if isinstance(event, StartScreenEvent):
             return GameStateType.START_SCREEN
         return None
         
@@ -185,7 +189,7 @@ class GameStateMachine:
     def current_state(self):
         return self.states[self.current_state_type]
         
-    def handle_event(self, event):
+    def handle_event(self, event: GameEvent):
         """Process event and potentially transition state."""
         new_state = self.current_state.handle_event(event)
         if new_state:

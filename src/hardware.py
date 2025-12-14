@@ -36,8 +36,12 @@ from . import config
 from . import battle_logic
 from .logger import setup_logger
 from .exceptions import HardwareError, APIError
+from .events import (
+    event_dispatcher, StartScreenEvent, CountdownStartEvent, CountdownFinishedEvent,
+    PlayerHitEvent, PlayerMissEvent, MoleEscapedEvent, MoleSpawnEvent, GameOverEvent
+)
 
-# --- GLOBAL THREAD-SAFE QUEUE ---
+# Legacy queue for backward compatibility during transition
 event_queue = queue.Queue()
 
 def trigger_ansible_job(final_score, max_retries=3):
@@ -158,7 +162,7 @@ class HardwareThread(threading.Thread):
 
     def countdown_sequence(self):
         # Signal countdown start
-        event_queue.put({"type": "COUNTDOWN_START"})
+        event_dispatcher.dispatch(CountdownStartEvent())
         
         if self.is_available:
             self.plasma.set_all(0, 0, 255, brightness=0.25) 
@@ -173,10 +177,9 @@ class HardwareThread(threading.Thread):
                 self.turn_off_mole(i - 1)
                 time.sleep(config.COUNTDOWN_FLASH_DURATION)
         
-        event_queue.put({"type": "COUNTDOWN_FINISHED"})
+        event_dispatcher.dispatch(CountdownFinishedEvent())
 
     def spawn_next_mole(self):
-# ... (spawn_next_mole remains the same) ...
         """Helper to spawn the next mole immediately after a hit/miss."""
         self.turn_off_mole(self.active_mole_light_index)
         
@@ -184,7 +187,7 @@ class HardwareThread(threading.Thread):
         self.active_mole_light_index = new_mole_index
         self.light_up_mole(self.active_mole_light_index)
         self.last_mole_time = time.time()
-        event_queue.put({"type": "MOLE_SPAWN", "index": new_mole_index})
+        event_dispatcher.dispatch(MoleSpawnEvent(light_index=new_mole_index))
 
 
     def run(self):
@@ -195,7 +198,7 @@ class HardwareThread(threading.Thread):
             self.active_mole_light_index = None
             
             # --- START SCREEN ---
-            event_queue.put({"type": "START_SCREEN"})
+            event_dispatcher.dispatch(StartScreenEvent())
             
             self.turn_off_mole(self.active_mole_light_index)
             # Use KEY_TO_LIGHT_INDEX from config
@@ -234,7 +237,7 @@ class HardwareThread(threading.Thread):
                 # 1. Mole timer/spawning logic
                 if (current_time - self.last_mole_time) > config.MOLE_DURATION:
                     if self.active_mole_light_index is not None:
-                        event_queue.put({"type": "MOLE_ESCAPED"})
+                        event_dispatcher.dispatch(MoleEscapedEvent())
                         
                     self.spawn_next_mole()
 
@@ -248,14 +251,14 @@ class HardwareThread(threading.Thread):
 
                                     if pressed_light_index == self.active_mole_light_index:
                                         self.score += 1
-                                        event_queue.put({"type": "PLAYER_HIT", "score": self.score})
+                                        event_dispatcher.dispatch(PlayerHitEvent(score=int(self.score)))
                                         
                                         self.spawn_next_mole() 
                                         
                                     else:
                                         self.score = max(0, self.score - 0.5)
                                         self.light_up_all_red()
-                                        event_queue.put({"type": "PLAYER_MISS", "score": self.score})
+                                        event_dispatcher.dispatch(PlayerMissEvent(score=self.score))
                                         
                                         self.spawn_next_mole() 
 
@@ -272,7 +275,17 @@ class HardwareThread(threading.Thread):
                 self.plasma.set_all(255, 255, 255, brightness=0.25)
                 self.plasma.show()
                 
-            event_queue.put({"type": "GAME_OVER", "score": self.score})
+            # Determine game over reason
+            if time_elapsed >= config.GAME_DURATION:
+                reason = "time_up"
+            elif battle_logic.PLAYER_FORTRESS['health'] <= 0:
+                reason = "defeat"
+            elif battle_logic.get_current_target_ship() is None:
+                reason = "victory"
+            else:
+                reason = "unknown"
+                
+            event_dispatcher.dispatch(GameOverEvent(score=self.score, reason=reason))
             
             # Trigger Ansible job when the game ends
             try:

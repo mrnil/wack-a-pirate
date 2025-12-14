@@ -12,6 +12,10 @@ from .sprites import EnemyShip, Cannon, Effect
 from .game_states import GameStateMachine
 from .logger import setup_logger
 from .exceptions import GameError, AssetError, HardwareError
+from .events import (
+    event_dispatcher, PlayerHitEvent, PlayerMissEvent, MoleEscapedEvent,
+    StartScreenEvent, ShipDestroyedEvent
+)
 
 class GameApp:
     """The main class managing the Pygame lifecycle and rendering."""
@@ -33,6 +37,9 @@ class GameApp:
             
             # Initialize state machine
             self.state_machine = GameStateMachine(self)
+            
+            # Subscribe to game events
+            self._setup_event_listeners()
             
             # Load resources with error handling
             self._load_resources()
@@ -134,50 +141,70 @@ class GameApp:
             if event.type == pygame.QUIT:
                 self.running = False
 
+    def _setup_event_listeners(self):
+        """Subscribe to game events."""
+        event_dispatcher.subscribe(StartScreenEvent, self._on_start_screen)
+        event_dispatcher.subscribe(PlayerHitEvent, self._on_player_hit)
+        event_dispatcher.subscribe(PlayerMissEvent, self._on_player_miss)
+        event_dispatcher.subscribe(MoleEscapedEvent, self._on_mole_escaped)
+        
+    def _on_start_screen(self, event: StartScreenEvent):
+        """Handle start screen event."""
+        self.all_sprites.empty()
+        self.last_game_score = 0
+        self.state_machine.handle_event(event)
+        
+    def _on_player_hit(self, event: PlayerHitEvent):
+        """Handle player hit event."""
+        if self.state_machine.is_playing():
+            current_ship = battle_logic.get_current_target_ship()
+            if current_ship:
+                result = current_ship.take_damage()
+                battle_logic.PLAYER_FORTRESS['health'] = min(
+                    battle_logic.PLAYER_FORTRESS['health'] + 0.5, 
+                    battle_logic.PLAYER_FORTRESS['max_health']
+                )
+                
+                cannonball = Effect(
+                    self.player_cannon.rect.center, 
+                    current_ship.rect.center,
+                    "HIT"
+                )
+                self.all_sprites.add(cannonball)
+                
+                if result == "SHIP_DESTROYED":
+                    event_dispatcher.dispatch(ShipDestroyedEvent(ship_name=current_ship.name))
+        
+        self.state_machine.handle_event(event)
+        
+    def _on_player_miss(self, event: PlayerMissEvent):
+        """Handle player miss event."""
+        self._handle_enemy_attack()
+        self.state_machine.handle_event(event)
+        
+    def _on_mole_escaped(self, event: MoleEscapedEvent):
+        """Handle mole escaped event."""
+        self._handle_enemy_attack()
+        self.state_machine.handle_event(event)
+        
+    def _handle_enemy_attack(self):
+        """Common logic for enemy attacks."""
+        if self.state_machine.is_playing():
+            current_ship = battle_logic.get_current_target_ship()
+            if current_ship and battle_logic.PLAYER_FORTRESS['health'] > 0:
+                battle_logic.PLAYER_FORTRESS['health'] = max(0, battle_logic.PLAYER_FORTRESS['health'] - 1) 
+                
+                cannonball = Effect(
+                    current_ship.rect.center, 
+                    self.player_cannon.rect.center,
+                    "MISS"
+                )
+                self.all_sprites.add(cannonball)
+    
     def _process_hardware_events(self):
-        """Reads events from the hardware thread queue and applies game mechanics."""
-        while not hardware.event_queue.empty():
-            try:
-                event = hardware.event_queue.get_nowait()
-                
-                # Handle game mechanics
-                if event['type'] == "START_SCREEN":
-                    self.all_sprites.empty()
-                    self.last_game_score = 0
-                    
-                elif event['type'] == "PLAYER_HIT" and self.state_machine.is_playing():
-                    current_ship = battle_logic.get_current_target_ship()
-                    if current_ship:
-                        current_ship.take_damage() 
-                        battle_logic.PLAYER_FORTRESS['health'] = min(
-                            battle_logic.PLAYER_FORTRESS['health'] + 0.5, 
-                            battle_logic.PLAYER_FORTRESS['max_health']
-                        )
-                        
-                        cannonball = Effect(
-                            self.player_cannon.rect.center, 
-                            current_ship.rect.center,
-                            "HIT"
-                        )
-                        self.all_sprites.add(cannonball)
-                        
-                elif event['type'] in ["PLAYER_MISS", "MOLE_ESCAPED"] and self.state_machine.is_playing():
-                    current_ship = battle_logic.get_current_target_ship()
-                    if current_ship and battle_logic.PLAYER_FORTRESS['health'] > 0:
-                        battle_logic.PLAYER_FORTRESS['health'] = max(0, battle_logic.PLAYER_FORTRESS['health'] - 1) 
-                        
-                        cannonball = Effect(
-                            current_ship.rect.center, 
-                            self.player_cannon.rect.center,
-                            "MISS"
-                        )
-                        self.all_sprites.add(cannonball)
-                
-                # Let state machine handle state transitions
-                self.state_machine.handle_event(event)
-                    
-            except queue.Empty:
-                break
+        """Legacy event processing - now handled by event dispatcher."""
+        # Events are now handled through the event dispatcher
+        pass
 
     def _update(self):
         """Updates the state of all game objects."""
@@ -247,6 +274,10 @@ class GameApp:
     def shutdown(self):
         """Gracefully stops threads and quits Pygame."""
         self.logger.info("Shutting down game")
+        
+        # Clear event listeners
+        event_dispatcher.clear_all()
+        
         try:
             if hasattr(self, 'hardware_thread'):
                 self.hardware_thread.stop()

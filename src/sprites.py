@@ -5,6 +5,7 @@ from . import config
 from . import battle_logic
 from .logger import setup_logger
 from .exceptions import AssetError
+from .events import event_dispatcher, ShipDestroyedEvent
 
 
 class EnemyShip(pygame.sprite.Sprite):
