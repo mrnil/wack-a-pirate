@@ -57,9 +57,11 @@ class GameApp:
 
             # Hardware Thread with error handling
             try:
-                self.hardware_thread = hardware.HardwareThread()
+                # Check if we should use mock hardware (for development)
+                use_mock = os.getenv('WACK_A_PIRATE_MOCK_HARDWARE', 'false').lower() == 'true'
+                self.hardware_thread = hardware.HardwareThread(use_mock_hardware=use_mock)
                 self.hardware_thread.start()
-                self.logger.info("Hardware thread started successfully")
+                self.logger.info(f"Hardware thread started successfully (mock={use_mock})")
             except Exception as e:
                 self.logger.warning(f"Hardware initialization failed: {e}")
                 raise HardwareError(f"Failed to initialize hardware: {e}")

@@ -7,24 +7,13 @@ import fcntl
 import requests
 import random 
 
-# Conditional hardware imports
+# Hardware abstraction
+from .hardware_interface import create_hardware, HardwareInterface
+
+# Import ecodes with fallback
 try:
-# ... (hardware imports remain the same) ...
-    import evdev
-    from plasma import auto
-    from evdev import InputDevice, ecodes
+    from evdev import ecodes
 except ImportError:
-# ... (placeholder imports remain the same) ...
-    print("WARNING: Hardware libraries (evdev, plasma) not found. Using placeholder imports.")
-    class InputDevice:
-        def __init__(self, path): raise FileNotFoundError
-        def fileno(self): return 0
-        def read(self): yield None
-    class auto:
-        def __init__(self, **kwargs): pass
-        def set_all(self, r, g, b, brightness=None): pass
-        def set_pixel(self, i, r, g, b, brightness=None): pass
-        def show(self): pass
     class ecodes:
         KEY_1 = 1; KEY_2 = 2; KEY_3 = 3; KEY_4 = 4; KEY_5 = 5
         KEY_6 = 6; KEY_7 = 7; KEY_8 = 8; KEY_9 = 9
@@ -90,85 +79,70 @@ def trigger_ansible_job(final_score, max_retries=3):
 
 
 class HardwareThread(threading.Thread):
-    def __init__(self):
+    def __init__(self, use_mock_hardware: bool = False):
         super().__init__()
         self.logger = setup_logger()
         self.running = True
-        self.is_available = False
+        self.use_mock_hardware = use_mock_hardware
         
-        # Hardware setup with comprehensive error handling
+        # Initialize hardware through abstraction layer
         try:
-            self.plasma = auto(default=f"GPIO:14:15:pixel_count={config.NUM_PIXELS}")
-            self.plasma.set_all(0, 0, 0)
-            self.plasma.show()
-            self.logger.info("LED hardware initialized")
+            self.hardware = create_hardware(
+                config.device_path, 
+                config.NUM_PIXELS, 
+                use_mock=use_mock_hardware
+            )
+            self.hardware.initialize()
+            self.logger.info(f"Hardware initialized (mock={use_mock_hardware})")
             
-            self.dev = InputDevice(config.device_path)
-            
-            # Set to non-blocking mode
-            fd = self.dev.fileno()
-            fl = fcntl.fcntl(fd, fcntl.F_GETFL)
-            fcntl.fcntl(fd, fcntl.F_SETFL, fl | os.O_NONBLOCK)
-            
-            self.logger.info(f"Input device initialized: {config.device_path}")
-            self.is_available = True
-            
-        except FileNotFoundError as e:
-            self.logger.warning(f"Input device not found: {config.device_path}")
-            raise HardwareError(f"Input device not found: {e}")
-        except PermissionError as e:
-            self.logger.error(f"Permission denied accessing hardware: {e}")
-            raise HardwareError(f"Hardware permission denied: {e}")
-        except Exception as e:
+        except HardwareError as e:
             self.logger.error(f"Hardware initialization failed: {e}")
-            raise HardwareError(f"Hardware setup failed: {e}")
+            # Fall back to mock hardware
+            self.logger.info("Falling back to mock hardware")
+            self.hardware = create_hardware(config.device_path, config.NUM_PIXELS, use_mock=True)
+            self.hardware.initialize()
         
         self.score = 0
         self.active_mole_light_index = None
         self.last_mole_time = 0
         self.game_start_time = 0
         
-    def get_pixel_indices_for_light(self, light_index):
-# ... (get_pixel_indices_for_light remains the same) ...
-        start = light_index * config.PIXELS_PER_BUTTON
-        end = start + config.PIXELS_PER_BUTTON
-        return start, end
-
     def light_up_mole(self, light_index):
-# ... (light_up_mole remains the same) ...
-        if self.is_available:
-            start_pixel, end_pixel = self.get_pixel_indices_for_light(light_index)
-            for i in range(start_pixel, end_pixel):
-                # Use config MOLE_COLOR
-                self.plasma.set_pixel(i, config.MOLE_COLOR[0], config.MOLE_COLOR[1], config.MOLE_COLOR[2], brightness=0.25)
-            self.plasma.show()
+        """Light up a specific mole."""
+        if self.hardware.is_available():
+            self.hardware.set_light(
+                light_index, 
+                config.MOLE_COLOR[0], 
+                config.MOLE_COLOR[1], 
+                config.MOLE_COLOR[2]
+            )
+            self.hardware.show_lights()
 
     def turn_off_mole(self, light_index):
-# ... (turn_off_mole remains the same) ...
-        if self.is_available and light_index is not None:
-            start_pixel, end_pixel = self.get_pixel_indices_for_light(light_index)
-            for i in range(start_pixel, end_pixel):
-                self.plasma.set_pixel(i, 0, 0, 0, brightness=0.25)
-            self.plasma.show()
+        """Turn off a specific mole."""
+        if self.hardware.is_available() and light_index is not None:
+            self.hardware.set_light(light_index, 0, 0, 0)
+            self.hardware.show_lights()
 
     def light_up_all_red(self):
-# ... (light_up_all_red remains the same) ...
-        if self.is_available:
-            self.plasma.set_all(255, 0, 0, brightness=0.25)
-            self.plasma.show()
+        """Flash all lights red for penalty."""
+        if self.hardware.is_available():
+            self.hardware.set_all_lights(255, 0, 0)
+            self.hardware.show_lights()
             time.sleep(config.PENALTY_FLASH_DURATION)
-            self.plasma.set_all(0, 0, 0, brightness=0.25)
-            self.plasma.show()
+            self.hardware.set_all_lights(0, 0, 0)
+            self.hardware.show_lights()
 
     def countdown_sequence(self):
         # Signal countdown start
         event_dispatcher.dispatch(CountdownStartEvent())
         
-        if self.is_available:
-            self.plasma.set_all(0, 0, 255, brightness=0.25) 
-            self.plasma.show()
+        if self.hardware.is_available():
+            self.hardware.set_all_lights(0, 0, 255)
+            self.hardware.show_lights()
             time.sleep(config.COUNTDOWN_FLASH_DURATION * 2)
-            self.plasma.set_all(0, 0, 0, brightness=0.25)
+            self.hardware.set_all_lights(0, 0, 0)
+            self.hardware.show_lights()
             time.sleep(config.COUNTDOWN_FLASH_DURATION)
 
             for i in range(3, 0, -1):
@@ -208,12 +182,13 @@ class HardwareThread(threading.Thread):
             start_pressed = False
             while not start_pressed and self.running:
                 try:
-                    for event in self.dev.read():
-                        if event.type == ecodes.EV_KEY and event.value == 1 and event.code == ecodes.KEY_5:
+                    events = self.hardware.read_input_events()
+                    for event_code, event_value in events:
+                        if event_value == 1 and event_code == ecodes.KEY_5:
                             start_pressed = True
                             break
-                except (IOError, BlockingIOError, AttributeError):
-                    # FIX: Use minimal sleep instead of pass to avoid CPU hogging while waiting for input
+                except Exception as e:
+                    self.logger.error(f"Error reading start input: {e}")
                     time.sleep(0.001)
 
             if not self.running: break
@@ -242,12 +217,13 @@ class HardwareThread(threading.Thread):
                     self.spawn_next_mole()
 
                 # 2. Read input
-                if self.is_available:
+                if self.hardware.is_available():
                     try:
-                        for event in self.dev.read():
-                            if event.type == ecodes.EV_KEY and event.value == 1:
-                                if self.active_mole_light_index is not None and event.code in config.KEY_TO_LIGHT_INDEX:
-                                    pressed_light_index = config.KEY_TO_LIGHT_INDEX[event.code]
+                        events = self.hardware.read_input_events()
+                        for event_code, event_value in events:
+                            if event_value == 1:  # Key press
+                                if self.active_mole_light_index is not None and event_code in config.KEY_TO_LIGHT_INDEX:
+                                    pressed_light_index = config.KEY_TO_LIGHT_INDEX[event_code]
 
                                     if pressed_light_index == self.active_mole_light_index:
                                         self.score += 1
@@ -260,10 +236,10 @@ class HardwareThread(threading.Thread):
                                         self.light_up_all_red()
                                         event_dispatcher.dispatch(PlayerMissEvent(score=self.score))
                                         
-                                        self.spawn_next_mole() 
+                                        self.spawn_next_mole()
 
-                    except (IOError, BlockingIOError, AttributeError):
-                        # FIX: Use minimal sleep instead of pass to reduce input read latency
+                    except Exception as e:
+                        self.logger.error(f"Error reading input events: {e}")
                         time.sleep(0.001)
                 
                 # FIX: Replace the ambiguous 'pass' with a controlled sleep to maintain thread responsiveness
@@ -271,9 +247,9 @@ class HardwareThread(threading.Thread):
 
             # --- GAME OVER CLEANUP ---
             self.turn_off_mole(self.active_mole_light_index)
-            if self.is_available:
-                self.plasma.set_all(255, 255, 255, brightness=0.25)
-                self.plasma.show()
+            if self.hardware.is_available():
+                self.hardware.set_all_lights(255, 255, 255)
+                self.hardware.show_lights()
                 
             # Determine game over reason
             if time_elapsed >= config.GAME_DURATION:
@@ -301,26 +277,27 @@ class HardwareThread(threading.Thread):
             
             while keys_pressed < keys_needed and self.running:
                 try:
-                    for event in self.dev.read():
-                        if event.type == ecodes.EV_KEY and event.value == 1:
+                    events = self.hardware.read_input_events()
+                    for event_code, event_value in events:
+                        if event_value == 1:  # Key press
                             keys_pressed += 1
-                            print(f"HARDWARE: Key press detected. {keys_pressed}/{keys_needed} to continue.")
+                            self.logger.info(f"Key press detected. {keys_pressed}/{keys_needed} to continue.")
                             break 
-                except (IOError, BlockingIOError, AttributeError):
+                except Exception as e:
+                    self.logger.error(f"Error reading restart input: {e}")
                     time.sleep(0.05) 
 
             if not self.running: break
             
-            if self.is_available:
-                self.plasma.set_all(0, 0, 0, brightness=0.25)
-                self.plasma.show()
+            if self.hardware.is_available():
+                self.hardware.set_all_lights(0, 0, 0)
+                self.hardware.show_lights()
 
     def stop(self):
         self.running = False
         try:
-            if self.is_available and hasattr(self, 'plasma'):
-                self.plasma.set_all(0, 0, 0)
-                self.plasma.show()
+            if hasattr(self, 'hardware'):
+                self.hardware.cleanup()
             self.logger.info("Hardware thread stopped gracefully")
         except Exception as e:
             self.logger.error(f"Error during hardware cleanup: {e}")
