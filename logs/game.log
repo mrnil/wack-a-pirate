@@ -1,6 +1,0 @@
-2025-12-14 11:08:04,994 - wack_a_pirate - INFO - Mock hardware initialized
-2025-12-14 11:08:04,997 - wack_a_pirate - INFO - Mock hardware cleanup complete
-2025-12-14 12:25:49,651 - wack_a_pirate - ERROR - Failed to load sprite sheet: No video mode has been set
-2025-12-14 12:25:49,651 - wack_a_pirate - WARNING - Failed to load retina sprites, trying standard: Sprite sheet loading failed: No video mode has been set
-2025-12-14 12:25:49,664 - wack_a_pirate - ERROR - Failed to load sprite sheet: No video mode has been set
-2025-12-14 12:25:49,664 - wack_a_pirate - ERROR - Failed to initialize sprite manager
