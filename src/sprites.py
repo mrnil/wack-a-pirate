@@ -2,7 +2,9 @@
 import pygame
 import os
 from . import config
-from . import battle_logic # Import to interact with global state (e.g., PLAYER_FORTRESS)
+from . import battle_logic
+from .logger import setup_logger
+from .exceptions import AssetError
 
 
 class EnemyShip(pygame.sprite.Sprite):
@@ -28,19 +30,24 @@ class EnemyShip(pygame.sprite.Sprite):
         self.rect = self.image.get_rect()
 
     def _load_and_scale(self, sprite_path):
-        """Loads and scales a single image for compatibility."""
-        # FIX: Use the new path resolution helper
+        """Loads and scales a single image with error handling."""
+        logger = setup_logger()
         full_path = config.resolve_asset_path(sprite_path)
+        
         try:
-            # IMPORTANT: Use convert_alpha() for transparency optimization
             original_image = pygame.image.load(full_path).convert_alpha()
             scale_factor = 0.75
             new_size = (int(original_image.get_width() * scale_factor), 
                         int(original_image.get_height() * scale_factor))
-            return pygame.transform.scale(original_image, new_size) 
+            return pygame.transform.scale(original_image, new_size)
+            
+        except FileNotFoundError:
+            logger.error(f"Ship sprite not found: {full_path}")
+            raise AssetError(f"Missing ship sprite: {sprite_path}")
         except pygame.error as e:
-            print(f"Error loading image {full_path}: {e}")
-            img = pygame.Surface((100, 100)) 
+            logger.error(f"Failed to load ship sprite {full_path}: {e}")
+            # Return fallback sprite
+            img = pygame.Surface((100, 100))
             img.fill((100, 100, 100))
             return img
 
@@ -58,16 +65,18 @@ class EnemyShip(pygame.sprite.Sprite):
 
     def take_damage(self):
         """Reduces the ship's current health."""
+        logger = setup_logger()
+        
         if not self.is_destroyed:
             self.current_health -= 1
             self.image = self.get_current_sprite() 
             
             if self.current_health <= 0:
                 self.is_destroyed = True
-                print(f"BATTLE: The {self.name} has been sunk!")
+                logger.info(f"Ship destroyed: {self.name}")
                 return "SHIP_DESTROYED"
             else:
-                print(f"BATTLE: Hit! The {self.name} has {self.current_health} HP remaining.")
+                logger.debug(f"Ship hit: {self.name} ({self.current_health} HP remaining)")
                 return "SHIP_HIT"
         return None
 
@@ -76,15 +85,15 @@ class Cannon(pygame.sprite.Sprite):
     def __init__(self):
         super().__init__()
         # Load cannon image
+        logger = setup_logger()
         try:
-            # FIX: Use the new path resolution helper
             full_path = config.resolve_asset_path("Ships/ship (2).png")
             original_image = pygame.image.load(full_path).convert_alpha()
-            # Use scale() for compatibility
             scale_factor = 1
             new_size = (int(original_image.get_width() * scale_factor), int(original_image.get_height() * scale_factor))
             self.image = pygame.transform.scale(original_image, new_size)
-        except pygame.error:
+        except (pygame.error, FileNotFoundError) as e:
+            logger.warning(f"Failed to load cannon sprite: {e}, using fallback")
             self.image = pygame.Surface((50, 30))
             self.image.fill(config.WHITE)
             
@@ -155,14 +164,16 @@ class Effect(pygame.sprite.Sprite):
             self.rect = self.image.get_rect(center=self.end_pos)
             
     def load_image(self, path, scale):
-        # FIX: Use the new path resolution helper
+        logger = setup_logger()
         full_path = config.resolve_asset_path(path)
+        
         try:
             original_image = pygame.image.load(full_path).convert_alpha()
             new_width = int(original_image.get_width() * scale)
             new_height = int(original_image.get_height() * scale)
             self.image = pygame.transform.scale(original_image, (new_width, new_height))
-        except pygame.error:
+        except (pygame.error, FileNotFoundError) as e:
+            logger.warning(f"Failed to load effect sprite {path}: {e}, using fallback")
             self.image = pygame.Surface((20, 20))
             self.image.fill(config.BLACK)
             

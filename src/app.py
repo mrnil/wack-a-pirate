@@ -10,52 +10,72 @@ from . import battle_logic
 from . import hardware
 from .sprites import EnemyShip, Cannon, Effect
 from .game_states import GameStateMachine
+from .logger import setup_logger
+from .exceptions import GameError, AssetError, HardwareError
 
 class GameApp:
     """The main class managing the Pygame lifecycle and rendering."""
     
     def __init__(self):
-        pygame.init()
+        self.logger = setup_logger()
         
-        self._setup_screen()
-        
-        # Update shared dimensions after screen setup
-        battle_logic.update_dimensions(self.screen.get_width(), self.screen.get_height())
-        
-        self.clock = pygame.time.Clock() 
-        self.running = True
-        self.last_game_score = 0
-        self.prerendered_background = None
-        
-        # Initialize state machine
-        self.state_machine = GameStateMachine(self)
-        
-        # Load resources
-        self._load_resources()
-        
-        # *** OPTIMIZATION STEP: Pre-render the tiled background once ***
-        self._prerender_background() 
-        
-        # Initialize Game State
-        battle_logic.initialize_fleet_structure()
-        
-        # Pygame Groups
-        self.all_sprites = pygame.sprite.Group()
-        self.cannon_sprites = pygame.sprite.Group()
-        
-        self.player_cannon = Cannon()
-        self.cannon_sprites.add(self.player_cannon)
+        try:
+            pygame.init()
+            self._setup_screen()
+            
+            # Update shared dimensions after screen setup
+            battle_logic.update_dimensions(self.screen.get_width(), self.screen.get_height())
+            
+            self.clock = pygame.time.Clock() 
+            self.running = True
+            self.last_game_score = 0
+            self.prerendered_background = None
+            
+            # Initialize state machine
+            self.state_machine = GameStateMachine(self)
+            
+            # Load resources with error handling
+            self._load_resources()
+            self._prerender_background() 
+            
+            # Initialize Game State
+            battle_logic.initialize_fleet_structure()
+            
+            # Pygame Groups
+            self.all_sprites = pygame.sprite.Group()
+            self.cannon_sprites = pygame.sprite.Group()
+            
+            self.player_cannon = Cannon()
+            self.cannon_sprites.add(self.player_cannon)
 
-        # Hardware Thread
-        self.hardware_thread = hardware.HardwareThread()
-        self.hardware_thread.start()
+            # Hardware Thread with error handling
+            try:
+                self.hardware_thread = hardware.HardwareThread()
+                self.hardware_thread.start()
+                self.logger.info("Hardware thread started successfully")
+            except Exception as e:
+                self.logger.warning(f"Hardware initialization failed: {e}")
+                raise HardwareError(f"Failed to initialize hardware: {e}")
+                
+        except pygame.error as e:
+            self.logger.error(f"Pygame initialization failed: {e}")
+            raise GameError(f"Failed to initialize game: {e}")
+        except Exception as e:
+            self.logger.error(f"Game initialization failed: {e}")
+            raise
 
     def _setup_screen(self):
         """Initialize Pygame screen, defaulting to fullscreen if possible."""
         try:
             self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
-        except pygame.error:
-            self.screen = pygame.display.set_mode((config.INITIAL_SCREEN_WIDTH, config.INITIAL_SCREEN_HEIGHT))
+            self.logger.info("Fullscreen mode initialized")
+        except pygame.error as e:
+            self.logger.warning(f"Fullscreen failed: {e}, using windowed mode")
+            try:
+                self.screen = pygame.display.set_mode((config.INITIAL_SCREEN_WIDTH, config.INITIAL_SCREEN_HEIGHT))
+                self.logger.info(f"Windowed mode initialized: {config.INITIAL_SCREEN_WIDTH}x{config.INITIAL_SCREEN_HEIGHT}")
+            except pygame.error as e:
+                raise GameError(f"Failed to initialize display: {e}")
             
         pygame.display.set_caption(config.CAPTION)
 
@@ -63,46 +83,50 @@ class GameApp:
         """Loads static assets like fonts and the ocean tile."""
         # Ocean Tile
         try:
-            # FIX: Use the robust path resolver for the tile image
             tile_path = config.resolve_asset_path("Tiles/tile_73.png")
-            # IMPORTANT: Use convert() for non-transparent backgrounds
             self.ocean_tile = pygame.image.load(tile_path).convert()
-        except pygame.error:
-            print("Error loading tile_73.png. Using solid color.")
+            self.logger.info("Ocean tile loaded successfully")
+        except (pygame.error, FileNotFoundError) as e:
+            self.logger.warning(f"Failed to load ocean tile: {e}, using solid color")
             self.ocean_tile = None
         
         # Fonts
         try:
-            font_path = config.PIRATE_FONT_PATH
+            font_path = config.resolve_font_path()
             self.font_score = pygame.font.Font(font_path, 48)
             self.font_large = pygame.font.Font(font_path, 96)
             self.font_medium = pygame.font.Font(font_path, 64)
             self.font_small = pygame.font.Font(font_path, 48)
-        except Exception:
+            self.logger.info("Custom fonts loaded successfully")
+        except (pygame.error, FileNotFoundError) as e:
+            self.logger.warning(f"Failed to load custom font: {e}, using default fonts")
             self.font_score = pygame.font.Font(None, 36)
             self.font_large = pygame.font.Font(None, 74)
             self.font_medium = pygame.font.Font(None, 48)
             self.font_small = pygame.font.Font(None, 36)
 
     def _prerender_background(self):
-        """Creates a single large surface of the tiled ocean background for efficient blitting.
-        This runs only once at startup."""
+        """Creates a single large surface of the tiled ocean background for efficient blitting."""
         if self.ocean_tile is None:
             self.prerendered_background = None
             return
 
-        screen_width = self.screen.get_width()
-        screen_height = self.screen.get_height()
-        tile_width = self.ocean_tile.get_width()
-        tile_height = self.ocean_tile.get_height()
-        
-        # 1. Create a surface the size of the screen and use convert() for speed
-        self.prerendered_background = pygame.Surface((screen_width, screen_height)).convert()
-        
-        # 2. Draw the ocean tile onto the new surface repeatedly (only once at init)
-        for x in range(0, screen_width, tile_width):
-            for y in range(0, screen_height, tile_height):
-                self.prerendered_background.blit(self.ocean_tile, (x, y))
+        try:
+            screen_width = self.screen.get_width()
+            screen_height = self.screen.get_height()
+            tile_width = self.ocean_tile.get_width()
+            tile_height = self.ocean_tile.get_height()
+            
+            self.prerendered_background = pygame.Surface((screen_width, screen_height)).convert()
+            
+            for x in range(0, screen_width, tile_width):
+                for y in range(0, screen_height, tile_height):
+                    self.prerendered_background.blit(self.ocean_tile, (x, y))
+                    
+            self.logger.info("Background prerendered successfully")
+        except pygame.error as e:
+            self.logger.error(f"Failed to prerender background: {e}")
+            self.prerendered_background = None
 
     def _process_input(self):
         """Processes Pygame events (QUIT). Hardware input is handled by the thread."""
@@ -222,10 +246,21 @@ class GameApp:
             
     def shutdown(self):
         """Gracefully stops threads and quits Pygame."""
-        print("Cleaning up threads and Pygame resources.")
-        self.hardware_thread.stop()
-        self.hardware_thread.join()
-        pygame.quit()
+        self.logger.info("Shutting down game")
+        try:
+            if hasattr(self, 'hardware_thread'):
+                self.hardware_thread.stop()
+                self.hardware_thread.join(timeout=5.0)
+                if self.hardware_thread.is_alive():
+                    self.logger.warning("Hardware thread did not stop gracefully")
+        except Exception as e:
+            self.logger.error(f"Error stopping hardware thread: {e}")
+        
+        try:
+            pygame.quit()
+            self.logger.info("Pygame shutdown complete")
+        except Exception as e:
+            self.logger.error(f"Error during Pygame shutdown: {e}")
 
     def run(self):
         """The main game loop."""
@@ -247,8 +282,10 @@ class GameApp:
                 self._draw()
                 
         except KeyboardInterrupt:
-            print("\nKeyboard interrupt detected. Initiating graceful shutdown...")
+            self.logger.info("Keyboard interrupt detected")
+            self.running = False
+        except Exception as e:
+            self.logger.error(f"Unexpected error in game loop: {e}", exc_info=True)
             self.running = False
         finally:
             self.shutdown()
-            sys.exit()

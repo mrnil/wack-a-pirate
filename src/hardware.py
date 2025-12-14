@@ -34,16 +34,17 @@ except ImportError:
 # Internal imports
 from . import config
 from . import battle_logic
+from .logger import setup_logger
+from .exceptions import HardwareError, APIError
 
 # --- GLOBAL THREAD-SAFE QUEUE ---
 event_queue = queue.Queue()
 
-def trigger_ansible_job(final_score):
+def trigger_ansible_job(final_score, max_retries=3):
     """
-    Sends an API request to Ansible Automation Platform (AWX/Tower).
-    Moved from GameApp into the Hardware/Utility layer.
+    Sends an API request to Ansible Automation Platform with retry logic.
     """
-# ... (trigger_ansible_job function remains the same) ...
+    logger = setup_logger()
     url = config.AAP_API_URL
     headers = {
         "Authorization": f"Bearer {config.AAP_AUTH_TOKEN}",
@@ -56,36 +57,48 @@ def trigger_ansible_job(final_score):
         }
     }
 
-    print(f"AUTOMATION: Attempting to trigger Ansible job with score: {int(final_score)}")
-    try:
-        # Use verify=False if you have a self-signed certificate, otherwise remove it.
-        response = requests.post(url, headers=headers, json=data, verify=False, timeout=5) 
-        response.raise_for_status() 
-        
-        if response.status_code == 201:
-            print(f"AUTOMATION: Successfully triggered Ansible Job ID: {response.json().get('job', 'N/A')}")
-        else:
-            print(f"AUTOMATION: Job launch returned unexpected status code: {response.status_code}")
+    logger.info(f"Triggering Ansible job with score: {int(final_score)}")
+    
+    for attempt in range(max_retries):
+        try:
+            response = requests.post(url, headers=headers, json=data, verify=False, timeout=10)
+            response.raise_for_status()
             
-    except requests.exceptions.HTTPError as err:
-        print(f"AUTOMATION ERROR: HTTP error occurred: {err}")
-    except requests.exceptions.RequestException as err:
-        print(f"AUTOMATION ERROR: Failed to connect to Ansible API: {err}")
+            if response.status_code == 201:
+                job_id = response.json().get('job', 'N/A')
+                logger.info(f"Successfully triggered Ansible Job ID: {job_id}")
+                return
+            else:
+                logger.warning(f"Unexpected status code: {response.status_code}")
+                
+        except requests.exceptions.Timeout:
+            logger.warning(f"Ansible API timeout (attempt {attempt + 1}/{max_retries})")
+        except requests.exceptions.HTTPError as e:
+            logger.error(f"HTTP error: {e} (attempt {attempt + 1}/{max_retries})")
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Request failed: {e} (attempt {attempt + 1}/{max_retries})")
+        
+        if attempt < max_retries - 1:
+            time.sleep(2 ** attempt)  # Exponential backoff
+    
+    logger.error("Failed to trigger Ansible job after all retries")
+    raise APIError("Failed to trigger Ansible automation after retries")
 
 
 class HardwareThread(threading.Thread):
     def __init__(self):
-# ... (HardwareThread.__init__ remains the same) ...
         super().__init__()
+        self.logger = setup_logger()
         self.running = True
         self.is_available = False
         
-        # Hardware setup
+        # Hardware setup with comprehensive error handling
         try:
-            # Use configuration constants
             self.plasma = auto(default=f"GPIO:14:15:pixel_count={config.NUM_PIXELS}")
             self.plasma.set_all(0, 0, 0)
             self.plasma.show()
+            self.logger.info("LED hardware initialized")
+            
             self.dev = InputDevice(config.device_path)
             
             # Set to non-blocking mode
@@ -93,12 +106,18 @@ class HardwareThread(threading.Thread):
             fl = fcntl.fcntl(fd, fcntl.F_GETFL)
             fcntl.fcntl(fd, fcntl.F_SETFL, fl | os.O_NONBLOCK)
             
-            print(f"HARDWARE: Initialized and listening on {config.device_path}...")
+            self.logger.info(f"Input device initialized: {config.device_path}")
             self.is_available = True
-        except FileNotFoundError:
-            print(f"HARDWARE: Error: Device not found at {config.device_path}. Running in simulation mode.")
+            
+        except FileNotFoundError as e:
+            self.logger.warning(f"Input device not found: {config.device_path}")
+            raise HardwareError(f"Input device not found: {e}")
+        except PermissionError as e:
+            self.logger.error(f"Permission denied accessing hardware: {e}")
+            raise HardwareError(f"Hardware permission denied: {e}")
         except Exception as e:
-            print(f"HARDWARE: An error occurred during device setup: {e}. Running in simulation mode.")
+            self.logger.error(f"Hardware initialization failed: {e}")
+            raise HardwareError(f"Hardware setup failed: {e}")
         
         self.score = 0
         self.active_mole_light_index = None
@@ -255,8 +274,13 @@ class HardwareThread(threading.Thread):
                 
             event_queue.put({"type": "GAME_OVER", "score": self.score})
             
-            # NEW: Trigger Ansible job when the game ends
-            trigger_ansible_job(self.score)
+            # Trigger Ansible job when the game ends
+            try:
+                trigger_ansible_job(self.score)
+            except APIError as e:
+                self.logger.error(f"Ansible automation failed: {e}")
+            except Exception as e:
+                self.logger.error(f"Unexpected error in automation: {e}")
 
             # Wait for user input to restart
             keys_needed = 2
@@ -280,7 +304,10 @@ class HardwareThread(threading.Thread):
 
     def stop(self):
         self.running = False
-        if self.is_available:
-            self.plasma.set_all(0, 0, 0)
-            self.plasma.show()
-        print("HARDWARE: Thread gracefully stopped.")
+        try:
+            if self.is_available and hasattr(self, 'plasma'):
+                self.plasma.set_all(0, 0, 0)
+                self.plasma.show()
+            self.logger.info("Hardware thread stopped gracefully")
+        except Exception as e:
+            self.logger.error(f"Error during hardware cleanup: {e}")

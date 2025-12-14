@@ -4,6 +4,8 @@ import random
 import math
 from . import config
 from .sprites import EnemyShip
+from .logger import setup_logger
+from .exceptions import GameError
 
 # --- GLOBAL GAME STATE (Managed by HardwareThread and read/drawn by GameApp) ---
 ENEMY_FLEET = []
@@ -22,50 +24,63 @@ def update_dimensions(width, height):
 def initialize_fleet_structure():
     """
     Creates the ship objects and assigns fixed, non-overlapping positions.
-    Images are loaded here and persist throughout the program run.
     """
     global ENEMY_FLEET
+    logger = setup_logger()
     
-    # Must be called after update_dimensions
     if ENEMY_FLEET:
-        return # Already initialized
+        return  # Already initialized
 
-    ENEMY_FLEET = [
-        # Pass the sprite loading responsibility to the EnemyShip class
-        EnemyShip(name, health, paths) for name, health, paths in config.SHIP_DATA
-    ]
-    
-    placed_positions = []
-    for ship in ENEMY_FLEET:
-        # Check if dimensions are valid before calculating position
-        if SCREEN_WIDTH > 0 and SCREEN_HEIGHT > 0:
-            ship.battle_pos = generate_non_overlapping_position(
-                ship.image.get_size(), 
-                MIN_SHIP_DISTANCE, 
-                placed_positions, 
-                config.SHIP_SPAWN_PADDING
-            )
-            placed_positions.append(ship.battle_pos)
+    try:
+        ENEMY_FLEET = [
+            EnemyShip(name, health, paths) for name, health, paths in config.SHIP_DATA
+        ]
+        logger.info(f"Created {len(ENEMY_FLEET)} ships")
+        
+        placed_positions = []
+        for ship in ENEMY_FLEET:
+            if SCREEN_WIDTH > 0 and SCREEN_HEIGHT > 0:
+                ship.battle_pos = generate_non_overlapping_position(
+                    ship.image.get_size(), 
+                    MIN_SHIP_DISTANCE, 
+                    placed_positions, 
+                    config.SHIP_SPAWN_PADDING
+                )
+                placed_positions.append(ship.battle_pos)
+            else:
+                logger.error("Invalid screen dimensions for ship placement")
+                raise GameError("Cannot place ships: invalid screen dimensions")
+                
+        logger.info("Fleet positioning complete")
+        
+    except Exception as e:
+        logger.error(f"Failed to initialize fleet: {e}")
+        raise GameError(f"Fleet initialization failed: {e}")
 
 def reset_game_for_new_round():
     """
     Safely resets the state of existing objects without reloading any images.
-    Called by the HardwareThread.
     """
     global ENEMY_FLEET, PLAYER_FORTRESS
+    logger = setup_logger()
     
-    if not ENEMY_FLEET:
-        # If fleet hasn't been initialized (e.g., failed asset loading), try to init
-        initialize_fleet_structure() 
+    try:
         if not ENEMY_FLEET:
-             return
+            initialize_fleet_structure()
+            if not ENEMY_FLEET:
+                raise GameError("Failed to initialize fleet for new round")
 
-    for ship in ENEMY_FLEET:
-        ship.current_health = ship.max_health
-        ship.is_destroyed = False
-        ship.image = ship.images["full"] # Reset visual state
+        for ship in ENEMY_FLEET:
+            ship.current_health = ship.max_health
+            ship.is_destroyed = False
+            ship.image = ship.images["full"]
 
-    PLAYER_FORTRESS['health'] = PLAYER_FORTRESS['max_health']
+        PLAYER_FORTRESS['health'] = PLAYER_FORTRESS['max_health']
+        logger.info("Game state reset for new round")
+        
+    except Exception as e:
+        logger.error(f"Failed to reset game state: {e}")
+        raise GameError(f"Game reset failed: {e}")
     
 def get_current_target_ship():
     """Returns the first ship in the fleet that is NOT yet destroyed."""
@@ -76,17 +91,19 @@ def get_current_target_ship():
 
 def generate_non_overlapping_position(ship_size, min_distance, existing_positions, padding):
     """
-    Generates a random (x, y) coordinate that is far from the center and 
-    does not overlap with existing_positions.
+    Generates a random (x, y) coordinate that doesn't overlap with existing positions.
     """
+    logger = setup_logger()
     CENTER_X = SCREEN_WIDTH // 2
     CENTER_Y = SCREEN_HEIGHT // 2
     
-    # Ensure there is room to spawn
-    MAX_DISTANCE = min(CENTER_X, CENTER_Y) - 50 
+    MAX_DISTANCE = min(CENTER_X, CENTER_Y) - 50
     
-    i = 0
-    while i < 1000: 
+    if MAX_DISTANCE <= min_distance:
+        logger.warning("Screen too small for proper ship spacing")
+        return (SCREEN_WIDTH - 100, 100)
+    
+    for attempt in range(1000):
         angle = random.uniform(0, 2 * math.pi)
         distance = random.uniform(min_distance, MAX_DISTANCE)
 
@@ -98,16 +115,12 @@ def generate_non_overlapping_position(ship_size, min_distance, existing_position
 
         for existing_pos in existing_positions:
             dist_to_other = new_pos.distance_to(pygame.Vector2(existing_pos))
-            # Rough distance check based on average size + padding
             if dist_to_other < (ship_size[0] + ship_size[1]) / 2 + padding:
                 is_overlapping = True
                 break
         
-        # Check screen bounds
         if not is_overlapping and 50 < x < SCREEN_WIDTH - 50 and 50 < y < SCREEN_HEIGHT - 50:
             return (int(x), int(y))
-
-        i += 1
     
-    # Fallback position if placement fails
+    logger.warning("Could not find non-overlapping position, using fallback")
     return (SCREEN_WIDTH - 100, 100)

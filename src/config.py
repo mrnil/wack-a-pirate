@@ -1,6 +1,14 @@
 # src/config.py
 import os
-from evdev import ecodes
+try:
+    from evdev import ecodes
+except ImportError:
+    # Mock for development/testing
+    class ecodes:
+        KEY_1 = 1; KEY_2 = 2; KEY_3 = 3; KEY_4 = 4; KEY_5 = 5
+        KEY_6 = 6; KEY_7 = 7; KEY_8 = 8; KEY_9 = 9
+        EV_KEY = 1
+
 
 # --- PATHS ---
 ASSET_PATH = "kenney_pirate-pack (1)/PNG/Retina"
@@ -84,3 +92,28 @@ SHIP_DATA = [
     ("Dreadnought (Boss)", 5, 
         {"full": "Ships/ship (6).png", "half": "Ships/ship (18).png", "destroyed": "Ships/ship (24).png"}),
 ]
+
+def validate_config():
+    """Validate configuration values."""
+    from .exceptions import ConfigError
+    
+    if GAME_DURATION <= 0:
+        raise ConfigError("GAME_DURATION must be positive")
+    if MOLE_DURATION <= 0:
+        raise ConfigError("MOLE_DURATION must be positive")
+    if PLAYER_MAX_HEALTH <= 0:
+        raise ConfigError("PLAYER_MAX_HEALTH must be positive")
+    if NUM_LIGHTS != 9:
+        raise ConfigError("NUM_LIGHTS must be 9")
+    if len(SHIP_DATA) == 0:
+        raise ConfigError("SHIP_DATA cannot be empty")
+    
+    # Validate ship data structure
+    for i, (name, health, sprites) in enumerate(SHIP_DATA):
+        if not isinstance(name, str) or not name:
+            raise ConfigError(f"Ship {i}: name must be non-empty string")
+        if not isinstance(health, int) or health <= 0:
+            raise ConfigError(f"Ship {i}: health must be positive integer")
+        required_sprites = {"full", "half", "destroyed"}
+        if not isinstance(sprites, dict) or not required_sprites.issubset(sprites.keys()):
+            raise ConfigError(f"Ship {i}: missing required sprite states")

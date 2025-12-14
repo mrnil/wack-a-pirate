@@ -4,24 +4,45 @@ import os
 import pygame
 from .app import GameApp 
 from . import config
+from .logger import setup_logger
+from .exceptions import GameError, AssetError, ConfigError
 
 def main():
     """Application entry point."""
+    logger = setup_logger()
     
-    # Simple check for asset folder
-    # FIX: Use the new internal path resolver to check the location relative to the project root
-    if not os.path.isdir(config._resolve_path(config.ASSET_PATH)):
-        print(f"Error: Asset directory not found. Please ensure the folder is located at '<project_root>/assets/{config.ASSET_PATH}' relative to 'src'.")
-        sys.exit(1)
-        
     try:
+        # Validate configuration
+        config.validate_config()
+        
+        # Validate asset directory
+        if not os.path.isdir(config._resolve_path(config.ASSET_PATH)):
+            raise AssetError(f"Asset directory not found: {config.ASSET_PATH}")
+        
+        logger.info("Starting Whack-A-Pirate Battle")
         app = GameApp()
         app.run()
-    except Exception as e:
-        print(f"A fatal error occurred: {e}")
-        # Ensure cleanup is attempted even if the app failed to initialize fully
+        
+    except ConfigError as e:
+        logger.error(f"Configuration error: {e}")
+        sys.exit(1)
+    except AssetError as e:
+        logger.error(f"Asset error: {e}")
+        sys.exit(1)
+    except GameError as e:
+        logger.error(f"Game error: {e}")
         if 'app' in locals():
-            app.shutdown() 
+            app.shutdown()
+        sys.exit(1)
+    except KeyboardInterrupt:
+        logger.info("Game interrupted by user")
+        if 'app' in locals():
+            app.shutdown()
+        sys.exit(0)
+    except Exception as e:
+        logger.critical(f"Fatal error: {e}", exc_info=True)
+        if 'app' in locals():
+            app.shutdown()
         sys.exit(1)
 
 if __name__ == "__main__":
