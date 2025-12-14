@@ -138,7 +138,9 @@ class HardwareThread(threading.Thread):
             self.plasma.show()
 
     def countdown_sequence(self):
-# ... (countdown_sequence remains the same) ...
+        # Signal countdown start
+        event_queue.put({"type": "COUNTDOWN_START"})
+        
         if self.is_available:
             self.plasma.set_all(0, 0, 255, brightness=0.25) 
             self.plasma.show()
