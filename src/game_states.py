@@ -55,7 +55,7 @@ class StartScreenState(GameState):
         center_y = screen_height // 2
         
         text = "PRESS 5 TO START BATTLE"
-        text_surface = self.app.font_medium.render(text, True, config.WHITE)
+        text_surface = self.app.get_cached_text(text, self.app.font_medium, config.WHITE)
         text_rect = text_surface.get_rect(center=(center_x, center_y))
         
         padding = 15
@@ -103,7 +103,7 @@ class PlayingState(GameState):
         
         # Draw score
         score_text = f"SCORE: {int(self.app.hardware_thread.score)}"
-        score_surface = self.app.font_score.render(score_text, True, config.WHITE)
+        score_surface = self.app.get_cached_text(score_text, self.app.font_score, config.WHITE)
         score_rect = score_surface.get_rect(topright=(screen_width - 10, 10))
         
         padding = 10
@@ -147,10 +147,10 @@ class GameOverState(GameState):
         score_text = f"FINAL SCORE: {self.app.last_game_score}"
         prompt_text = "PRESS ANY BUTTON TO CONTINUE"
         
-        # Render text
-        text_large = self.app.font_large.render(message, True, color)
-        text_medium = self.app.font_medium.render(score_text, True, config.WHITE)
-        text_small = self.app.font_small.render(prompt_text, True, config.WHITE)
+        # Render text (cached)
+        text_large = self.app.get_cached_text(message, self.app.font_large, color)
+        text_medium = self.app.get_cached_text(score_text, self.app.font_medium, config.WHITE)
+        text_small = self.app.get_cached_text(prompt_text, self.app.font_small, config.WHITE)
         
         # Calculate box dimensions
         padding = 30

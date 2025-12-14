@@ -16,6 +16,7 @@ from .events import (
     event_dispatcher, PlayerHitEvent, PlayerMissEvent, MoleEscapedEvent,
     StartScreenEvent, ShipDestroyedEvent
 )
+from .sprite_sheet import sprite_manager
 
 class GameApp:
     """The main class managing the Pygame lifecycle and rendering."""
@@ -34,6 +35,10 @@ class GameApp:
             self.running = True
             self.last_game_score = 0
             self.prerendered_background = None
+            self._text_cache = {}  # Cache for rendered text surfaces
+            
+            # Initialize sprite manager
+            sprite_manager.initialize()
             
             # Initialize state machine
             self.state_machine = GameStateMachine(self)
@@ -273,9 +278,27 @@ class GameApp:
 
 
             
+    def get_cached_text(self, text: str, font: pygame.font.Font, color: tuple) -> pygame.Surface:
+        """Get cached text surface or create and cache new one."""
+        cache_key = (text, id(font), color)
+        
+        if cache_key not in self._text_cache:
+            self._text_cache[cache_key] = font.render(text, True, color)
+        
+        return self._text_cache[cache_key]
+    
+    def clear_text_cache(self):
+        """Clear text cache to free memory."""
+        self._text_cache.clear()
+        self.logger.debug("Text cache cleared")
+    
     def shutdown(self):
         """Gracefully stops threads and quits Pygame."""
         self.logger.info("Shutting down game")
+        
+        # Clear caches
+        self.clear_text_cache()
+        sprite_manager.cleanup()
         
         # Clear event listeners
         event_dispatcher.clear_all()
